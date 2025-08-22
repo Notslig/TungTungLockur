@@ -1,12 +1,22 @@
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
+import java.net.URL;
 import java.nio.file.*;
 import java.util.*;
 import java.util.List;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.filechooser.FileSystemView;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+import java.lang.reflect.Type;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+
+
 
 public class DocBoardGX extends JFrame {
     private JPanel gridPanel;
@@ -20,72 +30,194 @@ public class DocBoardGX extends JFrame {
     private File profileImageFile;
     private boolean darkMode = false;
     private JComboBox<String> sortBox;
-
+    private String username;
 
 
 
     // Constructor
-    public DocBoardGX() {
-         // Ensure storage directory exists
+    public DocBoardGX(String username) {
+        this.username=username;
+
+        categories = SessionManager.loadSession(username);
+        if (categories.isEmpty()) {
+            categories.put("Default", new ArrayList<>());
+        }
+            files = categories.get("Default");
+            refreshTiles();
+
+            
+
+       
+
+
+
+        // Ensure storage directory exists
         storageDir = new File(System.getProperty("user.home"), "Documents/DocBoardStorage");
+        if (!storageDir.exists()) storageDir.mkdirs();
 
-       if (!storageDir.exists()) storageDir.mkdirs();
 
+        //load profile settings
         profileConfig = new File(storageDir, "profile.txt");
         profileImageFile = new File(storageDir, "profileicon.png");
 
 
+         //screen settings
         setTitle("DocBoard GX");
         setSize(1920, 1280);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
         applyTheme();
 
-       
-        
+
         
 
-        // === TOP PANEL ===
+       // === TOP PANEL ===
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.setBackground(new Color(35, 35, 35));
+        topPanel.setPreferredSize(new Dimension(getWidth(), 60));
         add(topPanel, BorderLayout.NORTH);   
 
         // Profile Picture in Center
         profileLabel = new JLabel();
-        profileLabel.setForeground(Color.WHITE);
-        profileLabel.setHorizontalTextPosition(JLabel.CENTER);
-        profileLabel.setVerticalTextPosition(JLabel.BOTTOM);
-        profileLabel.setPreferredSize(new Dimension(100, 100));
+        profileLabel.setPreferredSize(new Dimension(50, 50));
+        profileLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        profileLabel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 1, true));
         loadProfilePicture();
 
-        profileLabel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2, true));
-
+        profileLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        profileLabel.setToolTipText("Click to change profile picture");
+        //profile picture actions
         profileLabel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 changeProfilePicture();
             }
         });
+        
+        JPanel leftWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+        leftWrap.setOpaque(false);
+        leftWrap.add(profileLabel);
+        topPanel.add(leftWrap, BorderLayout.WEST);
 
-        topPanel.add(profileLabel, BorderLayout.CENTER);
+        JPanel centerBar = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        centerBar.setOpaque(false);
 
-        JPanel categoryAndSortPanel = new JPanel(new BorderLayout());
-        categoryAndSortPanel.setBackground(new Color(35, 35, 35));
 
-        // Category Bar at Bottom of Top Panel
-        JPanel categoryPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        categoryPanel.setBackground(new Color(35, 35, 35));
+
 
         categoryBox = new JComboBox<>(new String[]{"Default"});
         categoryBox.addActionListener(e -> switchCategory((String) categoryBox.getSelectedItem()));
-        categoryPanel.add(new JLabel(" "));
-        categoryPanel.add(categoryBox);
 
         JButton addCategoryBtn = new JButton("Add Category");
         addCategoryBtn.addActionListener(e -> addCategory());
-        categoryPanel.add(addCategoryBtn);
 
-        categoryAndSortPanel.add(categoryPanel, BorderLayout.WEST);
+
+        //  category buttons
+        JButton catDocs = new JButton("Documents");
+        JButton catImages = new JButton("Images");
+        JButton catAll = new JButton("All");
+
+        catDocs.addActionListener(e -> filterByExtension("doc", "docx", "pdf", "txt","xls"));
+        catImages.addActionListener(e -> filterByExtension("png", "jpg", "jpeg","avif"));
+        catAll.addActionListener(e -> switchCategory(currentCategory));
+
+
+
+
+        // === Sorting ComboBox ===
+        String[] sortOptions = {"A - Z", "Z - A", "By Extension", "By File Type"};
+        sortBox = new JComboBox<>(sortOptions);
+        sortBox.setPreferredSize(new Dimension(150, 25));
+        sortBox.addActionListener(e -> refreshTiles());
+
+
+        centerBar.add(new JLabel("Category:"));
+        centerBar.add(categoryBox);
+        centerBar.add(addCategoryBtn);
+        centerBar.add(new JSeparator(SwingConstants.VERTICAL) {{
+            setPreferredSize(new Dimension(1, 20));
+        }});
+
+        centerBar.add(catDocs);
+        centerBar.add(catImages);
+        centerBar.add(catAll);
+        centerBar.add(new JSeparator(SwingConstants.VERTICAL) {{
+            setPreferredSize(new Dimension(1, 20));
+        }});
+
+
+
+        JLabel sortLbl = new JLabel("Sort:");
+        centerBar.add(sortLbl);
+        // Optional sort icon if resource exists
+        Icon sortIcon = safeIcon("/icons/sort.png");
+        if (sortIcon != null) centerBar.add(new JLabel(sortIcon));
+        centerBar.add(sortBox);
+
+         topPanel.add(centerBar, BorderLayout.CENTER);
+
+
+
+         // Profile/Menu icon
+        JButton userMenu = new JButton(); 
+        Icon menuIcon = safeIcon("/icons/menuicon.png");
+        if (menuIcon != null) userMenu.setIcon(menuIcon); else userMenu.setText("☰");
+        userMenu.setPreferredSize(new Dimension(40, 40));
+        userMenu.setFocusPainted(false);
+        userMenu.setBorderPainted(false);
+        userMenu.setContentAreaFilled(false);
+
+
+        //menu options 
+        JPopupMenu menu = new JPopupMenu();
+
+        //log out function
+        JMenuItem logoutItem = new JMenuItem("Log Out");
+        //change theme
+        JMenuItem themeItem = new JMenuItem("Toggle Theme");
+        //convert img to pdf
+        JMenuItem imageToPdfItem = new JMenuItem("Convert Image to PDF");
+
+        menu.add(themeItem);
+        menu.add(imageToPdfItem);
+        menu.addSeparator();
+        menu.add(logoutItem);
+
+
+         userMenu.addActionListener(e -> menu.show(userMenu, 0, userMenu.getHeight()));
+        topPanel.add(new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10)) {{
+            setOpaque(false);
+            add(userMenu);
+        }}, BorderLayout.EAST);
+
+        // Menu actions
+        logoutItem.addActionListener(e -> {
+            JOptionPane.showMessageDialog(this, "Logging out...");
+            SessionManager.saveSession(username, categories);  // ✅ save before exit
+            System.exit(0);
+        });
+
+        themeItem.addActionListener(e -> {
+            darkMode = !darkMode;
+            applyTheme();
+            refreshTiles();
+        });
+        imageToPdfItem.addActionListener(e ->
+            {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                File imgFile = chooser.getSelectedFile();
+                File pdfFile = new File(imgFile.getParent(), 
+                               imgFile.getName().replaceFirst("[.][^.]+$", "") + ".pdf");
+            imageToPDF(imgFile, pdfFile);
+            JOptionPane.showMessageDialog(this, "PDF created: " + pdfFile.getAbsolutePath());
+            }
+            });
+        
+
+
+
 
         // === GRID PANEL ===
         gridPanel = new JPanel(new GridLayout(0, 3, 15, 15)); 
@@ -99,80 +231,9 @@ public class DocBoardGX extends JFrame {
         refreshTiles();
 
 
-        
-
-        // Profile/Menu icon
-        JButton userMenu = new JButton(new ImageIcon(getClass().getResource("/icons/menuicon.png"))); 
-        //userMenu.setFocusPainted(false);
-        //userMenu.setBackground(new Color(50, 50, 50));
-        //userMenu.setForeground(Color.WHITE);
-
-        JPopupMenu menu = new JPopupMenu();
-
-        JMenuItem logoutItem = new JMenuItem("Log Out");
-        logoutItem.addActionListener(e -> {
-        JOptionPane.showMessageDialog(this, "Logging out...");
-        System.exit(0);
-        });
-
-        JMenuItem themeItem = new JMenuItem("Toggle Theme");
-        themeItem.addActionListener(e -> {
-            darkMode = !darkMode;  
-            applyTheme();          
-            refreshTiles();
-        });
-
-        JMenuItem imageToPdfItem = new JMenuItem("Convert Image to PDF");
-        imageToPdfItem.addActionListener(e -> {
-            JOptionPane.showMessageDialog(this, "Convert image to PDF coming soon!");
-        });
 
 
-        menu.add(logoutItem);
-        menu.add(themeItem);
-        menu.add(imageToPdfItem);        
-
-
-        userMenu.addActionListener(e -> menu.show(userMenu, 0, userMenu.getHeight()));
-        topPanel.add(userMenu,BorderLayout.EAST);            
-        add(topPanel, BorderLayout.NORTH);
-        
-
-       // === Category Panel ===
-        JPanel sortPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10,5));    //FlowLayout.Right
-        sortPanel.setBackground(new Color(35, 35, 35));
-
-        // Example category buttons
-        JButton catDocs = new JButton("Documents");
-        JButton catImages = new JButton("Images");
-        JButton catAll = new JButton("All");
-
-        sortPanel.add(catDocs);
-        sortPanel.add(catImages);
-        sortPanel.add(catAll);
-
-        catDocs.addActionListener(e -> filterByExtension("doc", "docx", "pdf", "txt"));
-        catImages.addActionListener(e -> filterByExtension("png", "jpg", "jpeg"));
-        catAll.addActionListener(e -> switchCategory(currentCategory));
-
-
-
-        // === Sorting ComboBox ===
-        String[] sortOptions = {"A - Z", "Z - A", "By Extension", "By File Type"};
-        sortBox = new JComboBox<>(sortOptions);
-        sortBox.setPreferredSize(new Dimension(150, 25));
-        sortBox.addActionListener(e -> refreshTiles());
-
-        sortPanel.add(new JLabel(new ImageIcon("icons/sort.png"))); // sort icon
-        sortPanel.add(sortBox);
-
-        // Add category + sort panel to top
-        categoryAndSortPanel.add(sortPanel, BorderLayout.EAST);
-
-        topPanel.add(categoryAndSortPanel, BorderLayout.SOUTH);
-
-
-        // Load profile from saved config
+         // Load profile from saved config
         if (profileConfig.exists()) {
         try (BufferedReader br = new BufferedReader(new FileReader(profileConfig))) {
         String path = br.readLine();
@@ -186,34 +247,36 @@ public class DocBoardGX extends JFrame {
         } catch (IOException ignored) {}
 }
 
+
+
     }
 
 
-
-    private void applyTheme() {
-    if (darkMode) {
-        UIManager.put("Panel.background", Color.DARK_GRAY);
-        UIManager.put("Label.foreground", Color.WHITE);
-        UIManager.put("Button.background", Color.GRAY);
-        UIManager.put("Button.foreground", Color.WHITE);
-    } else {
-        UIManager.put("Panel.background", Color.LIGHT_GRAY);
-        UIManager.put("Label.foreground", Color.BLACK);
-        UIManager.put("Button.background", Color.WHITE);
-        UIManager.put("Button.foreground", Color.BLACK);
+   //==THEME==
+   private void applyTheme() {
+        if (darkMode) {
+            UIManager.put("Panel.background", new Color(25, 25, 25));
+            UIManager.put("Label.foreground", Color.WHITE);
+            UIManager.put("Button.background", new Color(45, 45, 45));
+            UIManager.put("Button.foreground", Color.WHITE);
+        } else {
+            UIManager.put("Panel.background", Color.WHITE);
+            UIManager.put("Label.foreground", Color.BLACK);
+            UIManager.put("Button.background", new Color(230, 230, 230));
+            UIManager.put("Button.foreground", Color.BLACK);
+        }
+        SwingUtilities.updateComponentTreeUI(this);
     }
-    SwingUtilities.updateComponentTreeUI(this);
-    }
 
 
+    // === PROFILE ===
     private void loadProfilePicture() {
-    if (profileImageFile.exists()) {
-        ImageIcon icon = new ImageIcon(profileImageFile.getAbsolutePath());
-        Image scaled = icon.getImage().getScaledInstance(100, 100, Image.SCALE_SMOOTH);
-        profileLabel.setIcon(new ImageIcon(scaled));
-    } else {
-        profileLabel.setText("Click to Add Photo");
-    }
+        if (profileImageFile.exists()) {
+            setProfileImage(profileImageFile);
+        } else {
+            profileLabel.setText("Add Photo");
+            profileLabel.setForeground(Color.WHITE);
+        }
     }
 
     // === PROFILE PICTURE ===
@@ -224,57 +287,52 @@ public class DocBoardGX extends JFrame {
     if (result == JFileChooser.APPROVE_OPTION) {
         File selectedFile = chooser.getSelectedFile();
         try {
-            Files.copy(selectedFile.toPath(), profileImageFile.toPath(),
-                       java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            loadProfilePicture();
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "Error saving profile picture: " + e.getMessage());
-        }
+                // Keep original extension
+                String ext = getFileExtension(selectedFile);
+                File newFile = new File(storageDir, "profile." + (ext.isEmpty() ? "png" : ext));
+                Files.copy(selectedFile.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                profileImageFile = newFile;
+                setProfileImage(profileImageFile);
+                try (PrintWriter pw = new PrintWriter(new FileWriter(profileConfig))) {
+                    pw.println(profileImageFile.getAbsolutePath());
+                }
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, "Error saving profile picture: " + e.getMessage());
+            }
     }
-    try (PrintWriter pw = new PrintWriter(new FileWriter(profileConfig))) {
-        pw.println(profileImageFile.getAbsolutePath());
-    } catch (IOException ex) {
-        ex.printStackTrace();
-    }
-    }
+} 
 
 
+    // === FILTER & SORT ===
     private void filterByExtension(String... exts) {
-    Set<String> extSet = new HashSet<>(Arrays.asList(exts));
-    List<File> filtered = new ArrayList<>();
-    for (File f : categories.getOrDefault(currentCategory, files)) {
-        if (extSet.contains(getFileExtension(f))) {
-            filtered.add(f);
+        Set<String> extSet = new HashSet<>();
+        for (String e : exts) extSet.add(e.toLowerCase());
+        List<File> base = categories.getOrDefault(currentCategory, new ArrayList<>());
+        List<File> filtered = new ArrayList<>();
+        for (File f : base) {
+            if (extSet.contains(getFileExtension(f))) filtered.add(f);
         }
+        files = filtered;
+        refreshTiles();
     }
-    files = filtered;
-    refreshTiles();
+
+
+    private void imageToPDF(File imageFile, File outputPdf) {
+    try (PDDocument doc = new PDDocument()) {
+        PDPage page = new PDPage();
+        doc.addPage(page);
+
+        PDImageXObject pdImage = PDImageXObject.createFromFile(imageFile.getAbsolutePath(), doc);
+        PDPageContentStream contentStream = new PDPageContentStream(doc, page);
+        contentStream.drawImage(pdImage, 50, 200, 500, 400); // (x, y, width, height)
+        contentStream.close();
+
+        doc.save(outputPdf);
+        System.out.println("PDF created at " + outputPdf.getAbsolutePath());
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
 }
-
-
-
-    /*private void convertImageToPDF() {
-    JFileChooser chooser = new JFileChooser();
-    chooser.setFileFilter(new FileNameExtensionFilter("Images", "png", "jpg", "jpeg"));
-    int result = chooser.showOpenDialog(this);
-    if (result == JFileChooser.APPROVE_OPTION) {
-        File imageFile = chooser.getSelectedFile();
-        File outputFile = new File(storageDir, imageFile.getName().replaceAll("\\.[^.]+$", "") + ".pdf");
-        try {
-            com.itextpdf.text.Document doc = new com.itextpdf.text.Document();
-            com.itextpdf.text.pdf.PdfWriter.getInstance(doc, new FileOutputStream(outputFile));
-            doc.open();
-            com.itextpdf.text.Image img = com.itextpdf.text.Image.getInstance(imageFile.getAbsolutePath());
-            img.scaleToFit(500, 700);
-            doc.add(img);
-            doc.close();
-            JOptionPane.showMessageDialog(this, "Saved as: " + outputFile.getAbsolutePath());
-            refreshTiles();
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "PDF conversion failed: " + e.getMessage());
-        }
-    }
-    }*/
 
 
 
@@ -289,11 +347,15 @@ public class DocBoardGX extends JFrame {
 
 
 
-    private void addCategory() {
+     private void addCategory() {
         String name = JOptionPane.showInputDialog(this, "Enter new category name:");
-        if (name != null && !name.trim().isEmpty() && !categories.containsKey(name)) {
-            categories.put(name, new ArrayList<>());
-            categoryBox.addItem(name);
+        if (name != null) {
+            name = name.trim();
+            if (!name.isEmpty() && !categories.containsKey(name)) {
+                categories.put(name, new ArrayList<>());
+                categoryBox.addItem(name);
+                categoryBox.setSelectedItem(name);
+            }
         }
     }
 
@@ -353,16 +415,19 @@ public class DocBoardGX extends JFrame {
                     return f1.getName().compareToIgnoreCase(f2.getName());
                 case "Z - A":
                     return f2.getName().compareToIgnoreCase(f1.getName());
-                case "By Extension":
+                case "By Extension": {
                     String ext1 = getFileExtension(f1);
                     String ext2 = getFileExtension(f2);
-                    return ext1.compareToIgnoreCase(ext2);
-                case "By File Type": // directories first, then files
+                    int c = ext1.compareToIgnoreCase(ext2);
+                    return (c != 0) ? c : f1.getName().compareToIgnoreCase(f2.getName());
+                }
+                case "By File Type": 
                     if (f1.isDirectory() && !f2.isDirectory()) return -1;
                     if (!f1.isDirectory() && f2.isDirectory()) return 1;
                     return f1.getName().compareToIgnoreCase(f2.getName());
+            default:
+                return 0;
             }
-            return 0;
         });
     }
 
@@ -381,27 +446,21 @@ public class DocBoardGX extends JFrame {
 
 
 
-    private Icon getCustomIcon(File file) {
-    if (file == null) {
-        return new ImageIcon(getClass().getResource("/icons/blankicon.png"));
+     private Icon getCustomIcon(File file) {
+        String name = file.getName().toLowerCase();
+        Icon icon = null;
+        if (name.endsWith(".pdf")) icon = safeIcon("/icons/pdficon.png");
+        else if (name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".gif"))
+            icon = safeIcon("/icons/imageicon.png");
+        else if (name.endsWith(".txt")) icon = safeIcon("/icons/txticon.png");
+        else if (name.endsWith(".doc") || name.endsWith(".docx")) icon = safeIcon("/icons/docicon.png");
+        else if (name.endsWith(".xls") || name.endsWith(".xlsx")) icon = safeIcon("/icons/excelicon.png");
+
+        if (icon == null) icon = FileSystemView.getFileSystemView().getSystemIcon(file);
+        return icon;
     }
 
-    String name = file.getName().toLowerCase();
-    if (name.endsWith(".pdf")) 
-        return new ImageIcon(getClass().getResource("/icons/pdficon.png"));
-    else if (name.endsWith(".png") || name.endsWith(".jpg")) 
-        return new ImageIcon(getClass().getResource("/icons/imageicon.png"));
-    else if (name.endsWith(".txt")) 
-        return new ImageIcon(getClass().getResource("/icons/txticon.png"));
-    else if (name.endsWith(".doc") || name.endsWith(".docx")) 
-        return new ImageIcon(getClass().getResource("/icons/docicon.png"));
-    else if (name.endsWith(".xls") || name.endsWith(".xlsx")) 
-        return new ImageIcon(getClass().getResource("/icons/excelicon.png"));
-    else 
-        return FileSystemView.getFileSystemView().getSystemIcon(file); 
-}
-
-
+//not currently using 
 private Icon getScaledIcon(Icon icon, int width, int height) {
     if (icon instanceof ImageIcon) {
         Image img = ((ImageIcon) icon).getImage();
@@ -414,17 +473,15 @@ private Icon getScaledIcon(Icon icon, int width, int height) {
 
     private JPanel createTile(String title, File file) {
     JPanel tile = new JPanel(new BorderLayout());
-    tile.setPreferredSize(new Dimension(200, 100)); 
+    tile.setPreferredSize(new Dimension(200, 120)); 
     tile.setBackground(new Color(40, 40, 40));
     tile.setBorder(BorderFactory.createLineBorder(new Color(90, 90, 90), 2, true));
 
-    Icon icon = (file == null) ? null : getCustomIcon(file);
-if (icon != null) {
-    icon = getScaledIcon(icon, 48, 48); //  scale to 48x48
-}
-   /*  if (icon == null) {
-        icon = new ImageIcon(getClass().getResource("\\icons\\blankicon.png")); // Default icon
-    }*/
+   Icon icon = (file == null) ? safeIcon("/icons/blankicon.png") : getCustomIcon(file);
+        if (icon instanceof ImageIcon) {
+            Image img = ((ImageIcon) icon).getImage().getScaledInstance(48, 48, Image.SCALE_SMOOTH);
+            icon = new ImageIcon(img);
+        }
 
     JLabel label = new JLabel("<html><center>" + title + "</center></html>", icon, SwingConstants.CENTER);
     label.setForeground(Color.WHITE);
@@ -458,17 +515,30 @@ if (icon != null) {
         renameItem.addActionListener(ev -> renameFile(file));
         removeItem.addActionListener(ev -> {
             files.remove(file);
+            categories.getOrDefault(currentCategory, files).remove(file);
             refreshTiles();
         });
 
         menu.add(renameItem);
         menu.add(removeItem);
-
         tile.setComponentPopupMenu(menu);
+
+        
     }
 
     return tile;
 }
+
+
+private Icon safeIcon(String resourcePath) {
+        try {
+            URL url = getClass().getResource(resourcePath);
+            if (url != null) return new ImageIcon(url);
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+
 
 
 
@@ -484,23 +554,25 @@ if (icon != null) {
 }
 
 
-//here
 
-    private void renameFile(File file) {
+   private void renameFile(File file) {
         String newName = JOptionPane.showInputDialog(this, "Enter new name:", file.getName());
-        String ext = getFileExtension(file);
-        if (!newName.toLowerCase().endsWith("." + ext)) {
-        newName += "." + ext;
+        if (newName == null) return;
+        newName = newName.trim();
+        if (newName.isEmpty()) return;
+
+        // preserve extension if user removed it
+        String currentExt = getFileExtension(file);
+        if (!currentExt.isEmpty() && !newName.toLowerCase().endsWith("." + currentExt)) {
+            newName += "." + currentExt;
         }
-        if (newName != null && !newName.trim().isEmpty()) {
-            File renamedFile = new File(storageDir, newName);
-            if (file.renameTo(renamedFile)) {
-                int idx = files.indexOf(file);
-                files.set(idx, renamedFile);
-                refreshTiles();
-            } else {
-                JOptionPane.showMessageDialog(this, "Rename failed!");
-            }
+        File renamedFile = new File(storageDir, newName);
+        if (file.renameTo(renamedFile)) {
+            int idx = files.indexOf(file);
+            if (idx >= 0) files.set(idx, renamedFile);
+            refreshTiles();
+        } else {
+            JOptionPane.showMessageDialog(this, "Rename failed!");
         }
     }
 
@@ -522,7 +594,7 @@ if (icon != null) {
 private void setProfileImage(File file) {
     if (file != null && file.exists()) {
         ImageIcon icon = new ImageIcon(file.getAbsolutePath());
-        Image img = icon.getImage().getScaledInstance(120, 120, Image.SCALE_SMOOTH);
+        Image img = icon.getImage().getScaledInstance(50, 50, Image.SCALE_SMOOTH);
         profileLabel.setIcon(new ImageIcon(img));
         profileLabel.setText(""); 
     }
@@ -574,7 +646,7 @@ private void setProfileImage(File file) {
             if (users.containsKey(user) && users.get(user).equals(pass)) {
                 JOptionPane.showMessageDialog(this, "Login successful!");
                 this.dispose(); 
-                new DocBoardGX().setVisible(true); 
+                new DocBoardGX(user).setVisible(true); 
             } else {
                 JOptionPane.showMessageDialog(this, "Invalid username or password!");
             }
@@ -621,8 +693,62 @@ private void setProfileImage(File file) {
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }
+    }  
+}
+
+ class SessionManager {
+    private static final Gson gson = new Gson();
 
     
-    
+    public static void saveSession(String username, Map<String, List<File>> categories) {
+        try {
+            File userDir = new File("storage/" + username);
+            if (!userDir.exists()) userDir.mkdirs();
+
+            File sessionFile = new File(userDir, "session.json");
+
+            // Convert File -> String paths for JSON
+            Map<String, List<String>> saveMap = new HashMap<>();
+            for (String key : categories.keySet()) {
+                List<String> paths = new ArrayList<>();
+                for (File f : categories.get(key)) {
+                    paths.add(f.getAbsolutePath());
+                }
+                saveMap.put(key, paths);
+            }
+
+            try (Writer writer = new FileWriter(sessionFile)) {
+                gson.toJson(saveMap, writer);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static Map<String, List<File>> loadSession(String username) {
+        try {
+            File sessionFile = new File("storage/" + username + "/session.json");
+            if (!sessionFile.exists()) return new HashMap<>();
+
+            try (Reader reader = new FileReader(sessionFile)) {
+                Type type = new TypeToken<Map<String, List<String>>>() {}.getType();
+                Map<String, List<String>> loaded = gson.fromJson(reader, type);
+
+               
+                Map<String, List<File>> fileMap = new HashMap<>();
+                for (String key : loaded.keySet()) {
+                    List<File> files = new ArrayList<>();
+                    for (String path : loaded.get(key)) {
+                        File f = new File(path);
+                        if (f.exists()) files.add(f);
+                    }
+                    fileMap.put(key, files);
+                }
+                return fileMap;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return new HashMap<>();
+    }
 }
