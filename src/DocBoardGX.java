@@ -43,7 +43,12 @@ public class DocBoardGX extends JFrame {
             categories.put("Default", new ArrayList<>());
         }
             files = categories.get("Default");
-            refreshTiles();
+            if (files == null) {
+                files = new ArrayList<>();
+                categories.put("Default", files);
+            }
+            currentCategory = "Default";
+            
 
             
 
@@ -245,11 +250,8 @@ public class DocBoardGX extends JFrame {
                 }
             }
         } catch (IOException ignored) {}
+        }
 }
-
-
-
-    }
 
 
    //==THEME==
@@ -402,11 +404,17 @@ public class DocBoardGX extends JFrame {
 
 
     // === TILE MANAGEMENT ===
-   private void refreshTiles() {
+private void refreshTiles() {
+    if (gridPanel == null) return;  //  safety check
     gridPanel.removeAll();
 
+    if (files == null) {  
+        files = new ArrayList<>();  //  ensure files never null
+        categories.putIfAbsent(currentCategory != null ? currentCategory : "Default", files);
+    }
+
     // --- SORT FILES BASED ON sortBox SELECTION ---
-    if (sortBox != null && sortBox.getSelectedItem() != null) {
+    if (sortBox != null && sortBox.getSelectedItem() != null && !files.isEmpty()) {
         String sortOption = (String) sortBox.getSelectedItem();
 
         files.sort((f1, f2) -> {
@@ -421,12 +429,12 @@ public class DocBoardGX extends JFrame {
                     int c = ext1.compareToIgnoreCase(ext2);
                     return (c != 0) ? c : f1.getName().compareToIgnoreCase(f2.getName());
                 }
-                case "By File Type": 
+                case "By File Type":
                     if (f1.isDirectory() && !f2.isDirectory()) return -1;
                     if (!f1.isDirectory() && f2.isDirectory()) return 1;
                     return f1.getName().compareToIgnoreCase(f2.getName());
-            default:
-                return 0;
+                default:
+                    return 0;
             }
         });
     }
@@ -437,7 +445,7 @@ public class DocBoardGX extends JFrame {
         gridPanel.add(tile);
     }
 
-    addAddTile(); 
+    addAddTile();  //  always add "Add" tile at end
 
     gridPanel.revalidate();
     gridPanel.repaint();
