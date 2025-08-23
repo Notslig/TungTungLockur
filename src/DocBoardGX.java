@@ -214,7 +214,7 @@ public class DocBoardGX extends JFrame {
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
                 File imgFile = chooser.getSelectedFile();
                 File pdfFile = new File(imgFile.getParent(), 
-                               imgFile.getName().replaceFirst("[.][^.]+$", "") + ".pdf");
+                imgFile.getName().replaceFirst("[.][^.]+$", "") + ".pdf");
             imageToPDF(imgFile, pdfFile);
             JOptionPane.showMessageDialog(this, "PDF created: " + pdfFile.getAbsolutePath());
             }
